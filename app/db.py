@@ -3,22 +3,22 @@ from sqlite3 import Error
 
 
 DEVICE_TABLE = 'devices'
-DEVICE_FIELDS = ['brand', 'name', 'device', 'model']
+DEVICE_FIELDS = ['brand', 'name', 'device', 'model', 'source']
 STAT_TABLE = 'stats'
-STAT_FIELDS = ['rank', 'code', 'code_orig', 'count']
+STAT_FIELDS = ['rank', 'code', 'code_orig', 'count', 'source']
 FONO_TABLE = 'fono'
 FONO_FIELDS = [
-    "code",
-    "Brand", "DeviceName", "_2g_bands", "_3_5mm_jack_", "_3g_bands",
-    "alert_types", "announced", "audio_quality", "battery_c",
-    "bluetooth", "browser", "camera", "card_slot", "chipset",
-    "colors", "cpu", "dimensions", "display", "display_c", "edge",
-    "features", "features_c", "gprs", "gps", "gpu", "internal",
-    "java", "loudspeaker", "loudspeaker_", "messaging", "multitouch",
-    "music_play", "nfc", "os", "performance", "primary_",
-    "protection", "radio", "resolution", "secondary", "sensors",
-    "sim", "size", "speed", "stand_by", "status", "talk_time",
-    "technology", "type", "usb", "video", "weight", "wlan"
+    'Brand', 'DeviceName', '_2g_bands', '_3_5mm_jack_', '_3g_bands',
+    '_4g_bands', 'alert_types', 'announced', 'audio_quality', 'battery_c',
+    'bluetooth', 'body_c', 'browser', 'build', 'camera', 'card_slot',
+    'chipset', 'colors', 'cpu', 'dimensions', 'display', 'display_c', 'edge',
+    'features', 'features_c', 'gprs', 'gps', 'gpu', 'infrared_port',
+    'internal', 'java', 'loudspeaker', 'loudspeaker_', 'messaging',
+    'multitouch', 'music_play', 'network_c', 'nfc', 'os', 'performance',
+    'price', 'primary_', 'protection', 'radio', 'resolution', 'sar', 'sar_eu',
+    'sar_us', 'secondary', 'sensors', 'sim', 'single', 'size', 'sound_c',
+    'speed', 'stand_by', 'status', 'talk_time', 'technology', 'type', 'usb',
+    'video', 'weight', 'wlan', 'source'
 ]
 
 
@@ -66,8 +66,21 @@ def create_fono_table(conn):
 def insert_row(conn, table, fields, to_db):
     """Insert data to db for csv"""
     cur = conn.cursor()
+    values = ', '.join(["?"]*len(to_db[0]))
     cur.executemany(
-        f"INSERT INTO {table} ({','.join(fields)}) VALUES (?, ?, ?, ?);",
+        f"INSERT INTO {table} ({','.join(fields)}) VALUES ({values});",
+        to_db
+    )
+    conn.commit()
+    cur.close()
+
+
+def insert_row_dict(conn, table, fields, to_db):
+    """Insert data to db for csv"""
+    cur = conn.cursor()
+    values = ', '.join(["?"]*len(to_db[0]))
+    cur.executemany(
+        f"INSERT INTO {table} ({','.join(fields)}) VALUES ({values});",
         to_db
     )
     conn.commit()
@@ -117,3 +130,15 @@ def get_device(conn, search):
     cur.close()
     if data:
         return {f:data[i] for i, f in enumerate(DEVICE_FIELDS)}
+
+
+def get_lineageos_stats(conn, limit=100):
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    # selects all fields from table where the device / model contains - exact
+    cur.execute(f'select rank, code, count from stats limit {limit};')
+    # to keep it simple, just get the first record found
+    data = cur.fetchall()
+    cur.close()
+    conn.row_factory = None
+    return data

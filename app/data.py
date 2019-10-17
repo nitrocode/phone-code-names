@@ -3,8 +3,9 @@ import json
 import csv
 import requests
 from bs4 import BeautifulSoup
-from app.db import insert_device_row, insert_stat_row, insert_fono_row, get_device
+from app.db import insert_device_row, insert_stat_row, insert_fono_row, get_device, get_lineageos_stats
 from app.db import FONO_FIELDS, STAT_FIELDS, DEVICE_FIELDS
+import re
 
 
 def save_request(url, output_file):
@@ -74,6 +75,17 @@ def parse_stat(stat):
     return [rank, code, code_orig, count]
 
 
+def get_fono_data(brand, device):
+    url = 'https://fonoapi.freshpixl.com/v1/getdevice'
+    data = {
+        'token': os.environ['FONO_API'],
+        'brand': brand,
+        'device': device
+    }
+    res = requests.post(url, data=data)
+    return res.json()
+
+
 def parse_fono(conn, datum):
     code = datum[1]
     model = get_device(conn, code)
@@ -88,10 +100,28 @@ def parse_fono(conn, datum):
         print(f'Missing brand "{model["brand"]}" and device "{model["name"]}" '
               f'from fono api. Status: {fono_data["status"]}')
         return
-    data = [d.replace('\r\n', ' ') for d in fono_data[0]]
-    values = data
+    data = fono_data[0]
+    # only keep fields defined in FONO_FIELDS
+    missing_undefined = []
+    for field in list(data):
+        if not field in FONO_FIELDS:
+            missing_undefined.append(field)
+            del data[field]
+    # in fono data i have not defined
+    if len(missing_undefined) > 0:
+        print('.')
+        print('upstream but not local: ', missing_undefined)
+    # set field to none if defined in FONO_FIELDS and missing from
+    # defined but not found in fono data
+    for field in list(set(FONO_FIELDS) - set(list(data))):
+        data[field] = None
+    data['code'] = code
+    data['count'] = datum[2]
+    return data
+    # data = [d.replace('\r\n', ' ') for d in fono_data[0].values()]
+    # values = data
     # add code item to beginning of values as a quasi primary key
-    return [code] + values
+    # return [code] + values
 
 
 def load_lineageos_devices(conn, output_file):
@@ -105,7 +135,8 @@ def load_lineageos_devices(conn, output_file):
         to_db = load_data_file(conn, output_file)
     except:
         save_file = f'{os.path.splitext(output_file)[0]}.json'
-        res_data = save_request('https://wiki.lineageos.org/search.json', save_file)
+        url = 'https://wiki.lineageos.org/search.json'
+        res_data = save_request(url, save_file)
         with open(output_file, 'w+') as fp:
             writer = csv.writer(
                 fp,
@@ -117,7 +148,8 @@ def load_lineageos_devices(conn, output_file):
             for datum in res_data:
                 if not ' - ' in datum['title']:
                     continue
-                new_datum = parse_title(datum['title'])
+                # parse and add source
+                new_datum = parse_title(datum['title']) + [url]
                 to_db.append(new_datum)
                 writer.writerow(new_datum)
     insert_device_row(conn, to_db)
@@ -129,7 +161,8 @@ def load_lineageos_stats(conn, output_file):
         to_db = load_data_file(conn, output_file)
     except:
         save_file = f'{os.path.splitext(output_file)[0]}.html'
-        data = save_request('https://stats.lineageos.org/', save_file)
+        url = 'https://stats.lineageos.org/'
+        data = save_request(url, save_file)
         soup = BeautifulSoup(data, 'html.parser')
         rows = soup.select('div#top-devices .leaderboard-row')
         with open(output_file, 'w+') as fp:
@@ -141,39 +174,35 @@ def load_lineageos_stats(conn, output_file):
             )
             writer.writerow(STAT_FIELDS)
             for row in rows:
-                new_datum = parse_stat(row.get_text())
+                # parse and add source
+                new_datum = parse_stat(row.get_text()) + [url]
                 to_db.append(new_datum)
                 writer.writerow(new_datum)
     insert_stat_row(conn, to_db)
 
 
-def get_lineageos_stats(conn, limit=10):
-    cur = conn.cursor()  
-    # selects all fields from table where the device / model contains - exact
-    cur.execute(f'select rank, code from stats limit {limit};')
-    # to keep it simple, just get the first record found
-    data = cur.fetchall()
-    cur.close()
-    return data
-
-
 def load_fono(conn, output_file):
     to_db = []
     try:
-        to_db = load_data_file(conn, output_file)
+        with open(output_file) as fp:
+            to_db = json.loads(fp.read())
     except:
-        data = get_lineageos_stats(conn)
-        with open(output_file, 'w+') as fp:
-            writer = csv.writer(
-                fp,
-                delimiter=',',
-                quotechar='"',
-                quoting=csv.QUOTE_ALL,
-            )
-            writer.writerow(FONO_FIELDS)
-            for datum in data:
-                values = parse_fono(conn, datum)
-                print(values)
+        data = get_lineageos_stats(conn, limit=10)
+        for datum in data:
+            values = parse_fono(conn, datum)
+            if values:
+                # if len(values) == 53:
+                # print(values)
                 to_db.append(values)
-                writer.writerow(values)
-    insert_fono_row(conn, to_db)
+                pass
+        with open(output_file, 'w') as fp:
+            fp.write(json.dumps(to_db))
+    # for db in to_db:
+    #     keys = db.keys()
+    #     for field in FONO_FIELDS:
+    #         if not field in keys:
+    #             print('fuck cannot find: ' + field)
+    #             break
+    # print(to_db)
+
+    # insert_fono_row(conn, to_db)
