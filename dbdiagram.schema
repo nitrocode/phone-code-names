@@ -1,0 +1,75 @@
+// Load into https://dbdiagram.io/d
+// Creating tables
+Table devices as d {
+  id int [pk, increment] // auto-increment
+  brand varchar
+  name varchar
+  device varchar
+  model varchar
+  source varchar
+  created_at timestamp
+}
+
+Table stats as s {
+  id int [pk, increment] // auto-increment
+  rank int
+  code varchar
+  count int
+  created_at timestamp
+}
+
+Table fono as f {
+  id int [pk, increment] // auto-increment
+  brand varchar
+  name varchar
+  2g varchar
+  35m_jack varchar
+  3g_bands varchar
+  4g_bands varchar
+  announced varchar
+  battery_c varchar
+  bluetooth varchar
+  card_slot varchar
+  charging varchar
+  chipset varchar
+  colors varchar
+  cpu varchar
+  dimensions varchar
+  display_c varchar
+  dual varchar
+  edge varchar
+  features varchar
+  gprs varchar
+  gps varchar
+  gpu varchar
+  internal varchar
+  loudspeaker varchar
+  nfc varchar
+  os varchar
+  price varchar
+  protection varchar
+  radio varchar
+  resolution varchar
+  sensors varchar
+  sim varchar
+  single varchar
+  size varchar
+  sound_c varchar
+  speed varchar
+  status varchar
+  technology varchar
+  type varchar
+  usb varchar
+  video varchar
+  weight varchar
+  wlan varchar
+  created_at timestamp
+}
+
+// Creating references
+// You can also define relaionship separately
+// > many-to-one; < one-to-many; - one-to-one
+Ref: d.brand - f.brand
+Ref: d.name - f.name
+Ref: s.code - d.device
+Ref: s.code - d.model
