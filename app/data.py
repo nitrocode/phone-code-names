@@ -30,7 +30,7 @@ def save_request(url, output_file):
     return data
 
 
-def load_data_file(conn, input_file):
+def load_data_file(conn, input_file, append_file_name=False):
     """Load data from input file
     
     :param conn: db connection
@@ -38,11 +38,18 @@ def load_data_file(conn, input_file):
     """
     with open(input_file) as fp:
         dr = csv.DictReader(fp)
-        to_db = [
-            # ([value.lower() for value in i.values()])
-            (list(i.values()))
-            for i in dr
-        ]
+        if append_file_name:
+            to_db = [
+                # ([value.lower() for value in i.values()])
+                (list(i.values()) + [input_file])
+                for i in dr
+            ]
+        else:
+            to_db = [
+                # ([value.lower() for value in i.values()])
+                (list(i.values()))
+                for i in dr
+            ]
     
     return to_db
 
@@ -102,19 +109,20 @@ def parse_fono(conn, datum):
         return
     data = fono_data[0]
     # only keep fields defined in FONO_FIELDS
-    missing_undefined = []
+    # missing_undefined = []
     for field in list(data):
+        data[field] = data[field].replace('\r\n', ' ')
         if not field in FONO_FIELDS:
-            missing_undefined.append(field)
+            # missing_undefined.append(field)
             del data[field]
     # in fono data i have not defined
-    if len(missing_undefined) > 0:
-        print('.')
-        print('upstream but not local: ', missing_undefined)
+    # if len(missing_undefined) > 0:
+    #     print('.')
+    #     print('upstream but not local: ', missing_undefined)
     # set field to none if defined in FONO_FIELDS and missing from
     # defined but not found in fono data
     for field in list(set(FONO_FIELDS) - set(list(data))):
-        data[field] = None
+        data[field] = ''
     data['code'] = code
     data['count'] = datum[2]
     return data
@@ -134,8 +142,8 @@ def load_lineageos_devices(conn, output_file):
     try:
         to_db = load_data_file(conn, output_file)
     except:
-        save_file = f'{os.path.splitext(output_file)[0]}.json'
         url = 'https://wiki.lineageos.org/search.json'
+        save_file = f'{os.path.splitext(output_file)[0]}.json'
         res_data = save_request(url, save_file)
         with open(output_file, 'w+') as fp:
             writer = csv.writer(
@@ -184,25 +192,26 @@ def load_lineageos_stats(conn, output_file):
 def load_fono(conn, output_file):
     to_db = []
     try:
-        with open(output_file) as fp:
-            to_db = json.loads(fp.read())
+        # with open(output_file) as fp:
+        #     to_db = json.loads(fp.read())
+        to_db = load_data_file(conn, output_file)
     except:
         data = get_lineageos_stats(conn, limit=10)
-        for datum in data:
-            values = parse_fono(conn, datum)
-            if values:
-                # if len(values) == 53:
-                # print(values)
-                to_db.append(values)
-                pass
-        with open(output_file, 'w') as fp:
-            fp.write(json.dumps(to_db))
-    # for db in to_db:
-    #     keys = db.keys()
-    #     for field in FONO_FIELDS:
-    #         if not field in keys:
-    #             print('fuck cannot find: ' + field)
-    #             break
-    # print(to_db)
+        with open(output_file, 'w+') as fp:
+            writer = csv.writer(
+                fp,
+                delimiter=',',
+                quotechar='"',
+                quoting=csv.QUOTE_ALL,
+            )
+            writer.writerow(FONO_FIELDS)
+            for datum in data:
+                values = parse_fono(conn, datum)
+                if values:
+                    new_datum = [values[field] for field in FONO_FIELDS]
+                    to_db.append(new_datum)
+                    writer.writerow(new_datum)
+        # with open(output_file, 'w') as fp:
+        #     fp.write(json.dumps(to_db))
 
-    # insert_fono_row(conn, to_db)
+    insert_fono_row(conn, to_db)

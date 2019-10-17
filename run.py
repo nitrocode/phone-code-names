@@ -20,36 +20,33 @@ def load_data(conn):
     ]
     los_stats_file = os.path.join('data', 'lineageos_stats.csv')
     los_devices_file = os.path.join('data', 'lineageos_devices.csv')
-    fono_file = os.path.join('data', 'fono_fields.json')
     
     try:
         create_devices_table(conn)
         create_stats_table(conn)
         create_fono_table(conn)
-    except:
-        print('Tables')
 
-    try:
         for csv_file in csv_files:
-            to_db = load_data_file(conn, csv_file)
+            to_db = load_data_file(conn, csv_file, append_file_name=True)
             insert_device_row(conn, to_db)
         load_lineageos_devices(conn, los_devices_file)
         load_lineageos_stats(conn, los_stats_file)
-        load_fono(conn, fono_file)
     except:
-        print('Data already loaded.')
-        pass
+        print('Tables and data already loaded.')
+        raise
 
 
 def main():
-    # db_file = ':memory:'
-    db_file = 'my.db'
+    db_file = ':memory:'
+    # db_file = 'my.db'
     conn = create_connection(db_file)
     # if it's from memory, reload data, otherwise assume it's there in db file
     load_data(conn)
+    fono_file = os.path.join('data', 'fono_fields.csv')
+    load_fono(conn, fono_file)
 
 
 if __name__ == "__main__":
-    # print('start')
+    print('start')
     main()
-    # print('fin')
+    print('fin')

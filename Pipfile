@@ -9,6 +9,8 @@ verify_ssl = true
 fonoapi = "*"
 beautifulsoup4 = "*"
 requests = "*"
+gspread = "*"
+oauth2client = "*"
 
 [requires]
 python_version = "3.8"

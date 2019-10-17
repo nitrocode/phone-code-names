@@ -8,6 +8,7 @@ STAT_TABLE = 'stats'
 STAT_FIELDS = ['rank', 'code', 'code_orig', 'count', 'source']
 FONO_TABLE = 'fono'
 FONO_FIELDS = [
+    'code', 'count',
     'Brand', 'DeviceName', '_2g_bands', '_3_5mm_jack_', '_3g_bands',
     '_4g_bands', 'alert_types', 'announced', 'audio_quality', 'battery_c',
     'bluetooth', 'body_c', 'browser', 'build', 'camera', 'card_slot',
@@ -18,7 +19,7 @@ FONO_FIELDS = [
     'price', 'primary_', 'protection', 'radio', 'resolution', 'sar', 'sar_eu',
     'sar_us', 'secondary', 'sensors', 'sim', 'single', 'size', 'sound_c',
     'speed', 'stand_by', 'status', 'talk_time', 'technology', 'type', 'usb',
-    'video', 'weight', 'wlan', 'source'
+    'video', 'weight', 'wlan'
 ]
 
 
@@ -133,12 +134,12 @@ def get_device(conn, search):
 
 
 def get_lineageos_stats(conn, limit=100):
-    conn.row_factory = sqlite3.Row
+    # conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     # selects all fields from table where the device / model contains - exact
     cur.execute(f'select rank, code, count from stats limit {limit};')
     # to keep it simple, just get the first record found
     data = cur.fetchall()
     cur.close()
-    conn.row_factory = None
+    # conn.row_factory = None
     return data
