@@ -3,7 +3,30 @@ import json
 import csv
 import requests
 from bs4 import BeautifulSoup
-from app.db import insert_device_row
+from app.db import insert_device_row, insert_stat_row, insert_fono_row, get_device
+from app.db import FONO_FIELDS, STAT_FIELDS, DEVICE_FIELDS
+
+
+def save_request(url, output_file):
+    # check for cached version
+    try:
+        with open(output_file) as fp:
+            data = fp.read()
+            try:
+                data = json.loads(data)
+            except:
+                pass
+    except:
+        # otherwise redownload and parse
+        page = requests.get(url)
+        with open(output_file, 'w') as fp:
+            try:
+                data = page.json()
+                fp.write(json.dumps(data))
+            except:
+                data = page.text
+                fp.write(data)
+    return data
 
 
 def load_data_file(conn, input_file):
@@ -19,20 +42,56 @@ def load_data_file(conn, input_file):
             (list(i.values()))
             for i in dr
         ]
-        for to in to_db:
-            if len(to) != 4:
-                print(to)
     
-    return insert_device_row(conn, to_db)
+    return to_db
 
 
 def parse_title(title):
+    """Parse strings from lineageos json
+
+    :param title: format should be `code - brand phone`
+    """
     split_datum = title.split(' - ')
-    device = split_datum[0]
     split_name = split_datum[1].split(' ')
+
+    device = split_datum[0]
     brand = split_name[0]
     name = ' '.join(split_name[1:])
+
     return [brand, name, device, device]
+
+
+def parse_stat(stat):
+    stat_clean = stat.replace('\n', ' ').replace('.', '').strip()
+    stat_list = stat_clean.split(' ')
+
+    rank = stat_list[0]
+    code_orig = ' '.join(stat_list[1:-1])
+    # remove xx and dd from the end of the code so we can get more matches
+    code = code_orig.rstrip('xx').rstrip('dd')
+    count = stat_list[-1]
+
+    return [rank, code, code_orig, count]
+
+
+def parse_fono(conn, datum):
+    code = datum[1]
+    model = get_device(conn, code)
+    if not model:
+        print(f'Missing codename "{code}" from devices table"')
+        return
+    # remove paranthetical strings from name
+    if '(' in model['name']:
+        model['name'] = re.sub(r'\(.*\)', '', model['name'])
+    fono_data = get_fono_data(model['brand'], model['name'])
+    if 'status' in fono_data:
+        print(f'Missing brand "{model["brand"]}" and device "{model["name"]}" '
+              f'from fono api. Status: {fono_data["status"]}')
+        return
+    data = [d.replace('\r\n', ' ') for d in fono_data[0]]
+    values = data
+    # add code item to beginning of values as a quasi primary key
+    return [code] + values
 
 
 def load_lineageos_devices(conn, output_file):
@@ -41,14 +100,12 @@ def load_lineageos_devices(conn, output_file):
     :param conn: db connection
     :input_file: csv file
     """
+    to_db = []
     try:
-        load_data_file(conn, output_file)
+        to_db = load_data_file(conn, output_file)
     except:
-        res = requests.get('https://wiki.lineageos.org/search.json')
-        res_data = res.json()
-        with open(f'{output_file}.json', 'w') as fp:
-            fp.write(json.dumps(res_data))
-        to_db = []
+        save_file = f'{os.path.splitext(output_file)[0]}.json'
+        res_data = save_request('https://wiki.lineageos.org/search.json', save_file)
         with open(output_file, 'w+') as fp:
             writer = csv.writer(
                 fp,
@@ -56,39 +113,67 @@ def load_lineageos_devices(conn, output_file):
                 quotechar='"',
                 quoting=csv.QUOTE_ALL,
             )
-            writer.writerow([
-                'Retail Branding','Marketing Name','Device','Model'
-            ])
+            writer.writerow(DEVICE_FIELDS)
             for datum in res_data:
                 if not ' - ' in datum['title']:
                     continue
                 new_datum = parse_title(datum['title'])
                 to_db.append(new_datum)
                 writer.writerow(new_datum)
-        insert_device_row(conn, to_db)
+    insert_device_row(conn, to_db)
 
 
 def load_lineageos_stats(conn, output_file):
+    to_db = []
     try:
-        with open(output_file) as fp:
-            return json.loads(fp.read())
+        to_db = load_data_file(conn, output_file)
     except:
-        page = requests.get('https://stats.lineageos.org/')
-        soup = BeautifulSoup(page.content, 'html.parser')
+        save_file = f'{os.path.splitext(output_file)[0]}.html'
+        data = save_request('https://stats.lineageos.org/', save_file)
+        soup = BeautifulSoup(data, 'html.parser')
         rows = soup.select('div#top-devices .leaderboard-row')
-        data = {}
-        for row in rows:
-            data_str = row.get_text().replace('\n', ' ').replace('.', '')
-            data_list = data_str.strip().split(' ')
-            data_to_join = data_list[1:-1]
-            code = ' '.join(data_list[1:-1])
-            code_key = code.rstrip('xx').rstrip('dd')
-            if code_key in data:
-                print(f'dupe: {code_key}')
-            data[code_key] = {
-                'rank': data_list[0],
-                'count': data_list[-1],
-                'code': code
-            }
-        with open(output_file, 'w') as fp:
-            fp.write(json.dumps(data))
+        with open(output_file, 'w+') as fp:
+            writer = csv.writer(
+                fp,
+                delimiter=',',
+                quotechar='"',
+                quoting=csv.QUOTE_ALL,
+            )
+            writer.writerow(STAT_FIELDS)
+            for row in rows:
+                new_datum = parse_stat(row.get_text())
+                to_db.append(new_datum)
+                writer.writerow(new_datum)
+    insert_stat_row(conn, to_db)
+
+
+def get_lineageos_stats(conn, limit=10):
+    cur = conn.cursor()  
+    # selects all fields from table where the device / model contains - exact
+    cur.execute(f'select rank, code from stats limit {limit};')
+    # to keep it simple, just get the first record found
+    data = cur.fetchall()
+    cur.close()
+    return data
+
+
+def load_fono(conn, output_file):
+    to_db = []
+    try:
+        to_db = load_data_file(conn, output_file)
+    except:
+        data = get_lineageos_stats(conn)
+        with open(output_file, 'w+') as fp:
+            writer = csv.writer(
+                fp,
+                delimiter=',',
+                quotechar='"',
+                quoting=csv.QUOTE_ALL,
+            )
+            writer.writerow(FONO_FIELDS)
+            for datum in data:
+                values = parse_fono(conn, datum)
+                print(values)
+                to_db.append(values)
+                writer.writerow(values)
+    insert_fono_row(conn, to_db)
