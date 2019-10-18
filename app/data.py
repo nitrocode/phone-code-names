@@ -1,14 +1,20 @@
 import os
 import json
 import csv
+import re
 import requests
 from bs4 import BeautifulSoup
-from app.db import insert_device_row, insert_stat_row, insert_fono_row, get_device, get_lineageos_stats
-from app.db import FONO_FIELDS, STAT_FIELDS, DEVICE_FIELDS
-import re
+from app.db import create_devices_table, create_stats_table, \
+    create_fono_table, insert_device_row, insert_stat_row, \
+    insert_fono_row, get_device, get_lineageos_stats, \
+    FONO_FIELDS, STAT_FIELDS, DEVICE_FIELDS
 
 
 def save_request(url, output_file):
+    """
+    Attempts to read from file. If there's no file, then it will
+    save the contents of a url in json/html
+    """
     # check for cached version
     try:
         with open(output_file) as fp:
@@ -70,6 +76,7 @@ def parse_title(title):
 
 
 def parse_stat(stat):
+    """Parses the stat html text to get rank, code, and count"""
     stat_clean = stat.replace('\n', ' ').replace('.', '').strip()
     stat_list = stat_clean.split(' ')
 
@@ -83,6 +90,7 @@ def parse_stat(stat):
 
 
 def get_fono_data(brand, device):
+    """Hits the fono api to get fields based on brand and device"""
     url = 'https://fonoapi.freshpixl.com/v1/getdevice'
     data = {
         'token': os.environ['FONO_API'],
@@ -93,12 +101,21 @@ def get_fono_data(brand, device):
     return res.json()
 
 
+def set_missing_fields_to_blank(data):
+    """Set field to empty if defined in FONO_FIELDS and missing"""
+    for field in list(set(FONO_FIELDS) - set(list(data))):
+        data[field] = ''
+    return data
+
+
 def parse_fono(conn, datum):
-    code = datum[1]
-    model = get_device(conn, code)
+    """This parses the fono data and combines it with lineageos data"""
+    model = get_device(conn, datum['code'])
     if not model:
-        print(f'Missing codename "{code}" from devices table"')
-        return
+        print(f"Missing codename '{datum['code']}' from devices table. "
+               "Add to missing_devices.csv")
+        data = datum.copy()
+        return set_missing_fields_to_blank(data)
     # remove paranthetical strings from name
     if '(' in model['name']:
         model['name'] = re.sub(r'\(.*\)', '', model['name'])
@@ -106,30 +123,24 @@ def parse_fono(conn, datum):
     if 'status' in fono_data:
         print(f'Missing brand "{model["brand"]}" and device "{model["name"]}" '
               f'from fono api. Status: {fono_data["status"]}')
-        return
+        data = dict(datum)
+        data['brand'] = model["brand"]
+        data['name'] = model["name"]
+        return set_missing_fields_to_blank(data)
+    # use only the first data point
     data = fono_data[0]
-    # only keep fields defined in FONO_FIELDS
-    # missing_undefined = []
     for field in list(data):
-        data[field] = data[field].replace('\r\n', ' ')
+        # Remove newlines from each field if they exist
+        if '\r\n' in data[field]:
+            data[field] = data[field].replace('\r\n', ' ')
+        # only keep fields defined in FONO_FIELDS
         if not field in FONO_FIELDS:
-            # missing_undefined.append(field)
             del data[field]
-    # in fono data i have not defined
-    # if len(missing_undefined) > 0:
-    #     print('.')
-    #     print('upstream but not local: ', missing_undefined)
     # set field to none if defined in FONO_FIELDS and missing from
     # defined but not found in fono data
-    for field in list(set(FONO_FIELDS) - set(list(data))):
-        data[field] = ''
-    data['code'] = code
-    data['count'] = datum[2]
+    data = set_missing_fields_to_blank(data)
+    data.update(datum)
     return data
-    # data = [d.replace('\r\n', ' ') for d in fono_data[0].values()]
-    # values = data
-    # add code item to beginning of values as a quasi primary key
-    # return [code] + values
 
 
 def load_lineageos_devices(conn, output_file):
@@ -164,6 +175,7 @@ def load_lineageos_devices(conn, output_file):
 
 
 def load_lineageos_stats(conn, output_file):
+    """Loads lineageos stats into the db"""
     to_db = []
     try:
         to_db = load_data_file(conn, output_file)
@@ -189,14 +201,13 @@ def load_lineageos_stats(conn, output_file):
     insert_stat_row(conn, to_db)
 
 
-def load_fono(conn, output_file):
+def load_fono(conn, output_file, limit):
+    """Loads combined fono and los stats data into db"""
     to_db = []
     try:
-        # with open(output_file) as fp:
-        #     to_db = json.loads(fp.read())
         to_db = load_data_file(conn, output_file)
     except:
-        data = get_lineageos_stats(conn, limit=10)
+        data = get_lineageos_stats(conn, limit)
         with open(output_file, 'w+') as fp:
             writer = csv.writer(
                 fp,
@@ -211,7 +222,31 @@ def load_fono(conn, output_file):
                     new_datum = [values[field] for field in FONO_FIELDS]
                     to_db.append(new_datum)
                     writer.writerow(new_datum)
-        # with open(output_file, 'w') as fp:
-        #     fp.write(json.dumps(to_db))
 
     insert_fono_row(conn, to_db)
+
+
+def load_data(conn, limit=10):
+    """Loads all data"""
+    csv_files = [
+        os.path.join('data', 'missing_devices.csv'),
+        os.path.join('data', 'google_devices.csv'),
+    ]
+    los_stats_file = os.path.join('data', 'lineageos_stats.csv')
+    los_devices_file = os.path.join('data', 'lineageos_devices.csv')
+    fono_file = os.path.join('data', 'fono_fields.csv')
+    
+    try:
+        create_devices_table(conn)
+        create_stats_table(conn)
+        create_fono_table(conn)
+
+        for csv_file in csv_files:
+            to_db = load_data_file(conn, csv_file, append_file_name=True)
+            insert_device_row(conn, to_db)
+    except:
+        print('Tables already loaded.')
+
+    load_lineageos_devices(conn, los_devices_file)
+    load_lineageos_stats(conn, los_stats_file)
+    load_fono(conn, fono_file, limit=100)

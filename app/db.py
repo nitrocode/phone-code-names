@@ -8,7 +8,7 @@ STAT_TABLE = 'stats'
 STAT_FIELDS = ['rank', 'code', 'code_orig', 'count', 'source']
 FONO_TABLE = 'fono'
 FONO_FIELDS = [
-    'code', 'count',
+    'rank', 'count', 'code', 
     'Brand', 'DeviceName', '_2g_bands', '_3_5mm_jack_', '_3g_bands',
     '_4g_bands', 'alert_types', 'announced', 'audio_quality', 'battery_c',
     'bluetooth', 'body_c', 'browser', 'build', 'camera', 'card_slot',
@@ -41,12 +41,9 @@ def create_connection(db_file):
 
 def create_table(conn, table, fields):
     """Create table for csv"""
-    # try:
     cur = conn.cursor()
     cur.execute(f"CREATE TABLE {table} ({','.join(fields)});")
     cur.close()
-    # except:
-    #     print(f'Table {table} already exists.')
 
 
 def create_devices_table(conn):
@@ -133,13 +130,14 @@ def get_device(conn, search):
         return {f:data[i] for i, f in enumerate(DEVICE_FIELDS)}
 
 
-def get_lineageos_stats(conn, limit=100):
-    # conn.row_factory = sqlite3.Row
+def get_lineageos_stats(conn, limit):
+    """Retrieves lineageos stats with a specified limit"""
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     # selects all fields from table where the device / model contains - exact
     cur.execute(f'select rank, code, count from stats limit {limit};')
     # to keep it simple, just get the first record found
     data = cur.fetchall()
     cur.close()
-    # conn.row_factory = None
+    conn.row_factory = None
     return data
