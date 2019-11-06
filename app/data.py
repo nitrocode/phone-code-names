@@ -42,22 +42,26 @@ def load_data_file(conn, input_file, append_file_name=False):
     :param conn: db connection
     :input_file: csv file
     """
-    with open(input_file) as fp:
-        dr = csv.DictReader(fp)
-        if append_file_name:
-            to_db = [
-                # ([value.lower() for value in i.values()])
-                (list(i.values()) + [input_file])
-                for i in dr
-            ]
-        else:
-            to_db = [
-                # ([value.lower() for value in i.values()])
-                (list(i.values()))
-                for i in dr
-            ]
-    
-    return to_db
+    try:
+        print(f'Attempting to read {input_file}')
+        with open(input_file, 'r') as fp:
+            dr = csv.DictReader(fp)
+            if append_file_name:
+                to_db = [
+                    # ([value.lower() for value in i.values()])
+                    (list(i.values()) + [input_file])
+                    for i in dr
+                ]
+            else:
+                to_db = [
+                    # ([value.lower() for value in i.values()])
+                    (list(i.values()))
+                    for i in dr
+                ]
+        return to_db
+    except OSError as e:
+        print(f'Could not find {input_file}')
+        raise
 
 
 def parse_title(title):
@@ -81,9 +85,11 @@ def parse_stat(stat):
     stat_list = stat_clean.split(' ')
 
     rank = stat_list[0]
-    code_orig = ' '.join(stat_list[1:-1])
+    code = code_orig = ' '.join(stat_list[1:-1])
     # remove xx and dd from the end of the code so we can get more matches
-    code = code_orig.rstrip('xx').rstrip('dd')
+    # Note: rstrip will remove 'd' even if it doesn't find 'dd' ...
+    if code.endswith('dd') or code.endswith('xx'):
+        code = code[:-2]
     count = stat_list[-1]
 
     return [rank, code, code_orig, count]
@@ -91,6 +97,8 @@ def parse_stat(stat):
 
 def get_fono_data(brand, device):
     """Hits the fono api to get fields based on brand and device"""
+    if not(brand and device):
+        return {'status': 'error'}
     url = 'https://fonoapi.freshpixl.com/v1/getdevice'
     data = {
         'token': os.environ['FONO_API'],
@@ -114,20 +122,28 @@ def parse_fono(conn, datum):
     if not model:
         print(f"Missing codename '{datum['code']}' from devices table. "
                "Add to missing_devices.csv")
-        data = datum.copy()
-        return set_missing_fields_to_blank(data)
+        return set_missing_fields_to_blank(dict(datum))
     # remove paranthetical strings from name
     if '(' in model['name']:
         model['name'] = re.sub(r'\(.*\)', '', model['name'])
     fono_data = get_fono_data(model['brand'], model['name'])
+    # if status is present, that means fono errored out
+    # if there is a slash, try hitting the fono api again with the first half
+    if 'status' in fono_data and '/' in model['name']:
+        split_name = model['name'].split()
+        fono_data = get_fono_data(model['brand'], split_name[0])
+        # if another error, try hitting it again with the second name
+        if 'status' in fono_data:
+            fono_data = get_fono_data(model['brand'], split_name[1])
+    # if status is present, that means fono errored out
     if 'status' in fono_data:
         print(f'Missing brand "{model["brand"]}" and device "{model["name"]}" '
               f'from fono api. Status: {fono_data["status"]}')
         data = dict(datum)
-        data['brand'] = model["brand"]
-        data['name'] = model["name"]
+        data['Brand'] = model["brand"]
+        data['DeviceName'] = model["name"]
         return set_missing_fields_to_blank(data)
-    # use only the first data point
+    # assume first result found from the fono api is correct
     data = fono_data[0]
     for field in list(data):
         # Remove newlines from each field if they exist
@@ -226,7 +242,7 @@ def load_fono(conn, output_file, limit):
     insert_fono_row(conn, to_db)
 
 
-def load_data(conn, limit=10):
+def load_data(conn, fono_file, limit=100):
     """Loads all data"""
     csv_files = [
         os.path.join('data', 'missing_devices.csv'),
@@ -234,7 +250,6 @@ def load_data(conn, limit=10):
     ]
     los_stats_file = os.path.join('data', 'lineageos_stats.csv')
     los_devices_file = os.path.join('data', 'lineageos_devices.csv')
-    fono_file = os.path.join('data', 'fono_fields.csv')
     
     try:
         create_devices_table(conn)
@@ -249,4 +264,4 @@ def load_data(conn, limit=10):
 
     load_lineageos_devices(conn, los_devices_file)
     load_lineageos_stats(conn, los_stats_file)
-    load_fono(conn, fono_file, limit=100)
+    load_fono(conn, fono_file, limit)

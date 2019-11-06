@@ -16,7 +16,7 @@ def connect():
     return client
 
 
-def write_data(client, sheet_name, data_file):
+def write_data(client, sheet_name, data_file, debug=False):
     sheet = client.open(sheet_name).sheet1
 
     cells = []
@@ -24,7 +24,6 @@ def write_data(client, sheet_name, data_file):
         dr = csv.reader(fp)
         for row_num, row in enumerate(dr):
             for col_num, cell in enumerate(row):
-                # sheet.insert_row(row, idx + 1)
                 cells.append(
                     gspread.Cell(
                         row_num + 1, col_num + 1,
@@ -32,4 +31,5 @@ def write_data(client, sheet_name, data_file):
                     )
                 )
 
-    sheet.update_cells(cells)
+    if not debug:
+        sheet.update_cells(cells)
