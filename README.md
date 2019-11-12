@@ -71,6 +71,8 @@ Important
     * also get if this version is officially supported or not. might be able to tell if it's missing from `search.json`.
     * include links to supported devices
     * include links for unsupported devices
+* Scrape ifixit for fixit scores
+* Create separate Python SDK similar to [jaredrummler/AndroidDeviceNames](https://github.com/jaredrummler/AndroidDeviceNames)
 * Get average or min/max cost metrics per phone. If new is unavailable, find used.
     * Amazon, Craigslist, FB Marketplace, Ebay
 
@@ -81,12 +83,12 @@ Medium
 * redownload files if last scrape is more than 7 days ago
     * save all files with a timestamp
 * find a way to improve match rates. Roughly 50 to 70% right now.
+    * once improved, go from top 100 to top 200 and keep iterating
 * audit matches to see if they are correct
 
 Minor
 
 * strip out `android_x86` as it may be an android virtual machine
-* download supported_devices.csv using python instead of curl
 * save data to database file instead of memory
     * why? what does a db even buy us?
     * create better db schema
@@ -94,3 +96,4 @@ Minor
         * stats table
         * fono api table
         * create_at timestamp from when data was retrieved
+* prefix comma delimited sources of data
